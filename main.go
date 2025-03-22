@@ -22,13 +22,12 @@ func main() {
     var cfg apiConfig
     mux := http.NewServeMux()
 
-    handler := http.StripPrefix("/app/",http.FileServer(http.Dir(".")))
-    mux.Handle("/app/", cfg.middlewareMetricsInt(handler))
+    mux.Handle("/app/", cfg.middlewareMetricsInt(http.FileServer(http.Dir("."))))
 
     mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, req *http.Request) {
         w.Header().Add("Content-Type", "text/plain; charset=utf-8")
         w.WriteHeader(http.StatusOK)
-        w.Write([]byte("OK"))
+        fmt.Fprintf(w, "OK")
     })
 
     mux.HandleFunc("GET /metrics", func(w http.ResponseWriter, req *http.Request) {
