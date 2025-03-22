@@ -25,18 +25,18 @@ func main() {
     handler := http.StripPrefix("/app/",http.FileServer(http.Dir(".")))
     mux.Handle("/app/", cfg.middlewareMetricsInt(handler))
 
-    mux.HandleFunc("/healthz", func(w http.ResponseWriter, req *http.Request) {
+    mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, req *http.Request) {
         w.Header().Add("Content-Type", "text/plain; charset=utf-8")
         w.WriteHeader(http.StatusOK)
         w.Write([]byte("OK"))
     })
 
-    mux.HandleFunc("/metrics", func(w http.ResponseWriter, req *http.Request) {
+    mux.HandleFunc("GET /metrics", func(w http.ResponseWriter, req *http.Request) {
         w.Header().Add("Content-Type", "text/plain; charset=utf-8")
         fmt.Fprintf(w, "Hits: %d", cfg.fileserverHits.Load())
     })
 
-    mux.HandleFunc("/reset", func(w http.ResponseWriter, req *http.Request) {
+    mux.HandleFunc("POST /reset", func(w http.ResponseWriter, req *http.Request) {
         cfg.fileserverHits.Store(0)
         w.Header().Add("Content-Type", "text/plain; charset=utf-8")
         w.WriteHeader(http.StatusOK)
