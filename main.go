@@ -18,10 +18,6 @@ import (
 	_ "github.com/lib/pq"
 )
 
-type request struct {
-    Body string `json:"body"`
-}
-
 
 type apiConfig struct {
     fileserverHits atomic.Int32
@@ -119,17 +115,26 @@ func main() {
         fmt.Fprintf(w, "OK")
     })
 
-    mux.HandleFunc("POST /api/validate_chirp", func(w http.ResponseWriter, req *http.Request) {
+    mux.HandleFunc("POST /api/chirps", func(w http.ResponseWriter, req *http.Request) {
         type errResponse struct {
             Error string `json:"error"`
         }
+
+        type newChirpRequest struct {
+            Body string `json:"body"`
+            UserId uuid.UUID `json:"user_id"`
+        }
         
-        type cleanedResponse struct {
-            Body string `json:"cleaned_body"`
+        type newChirpResponse struct {
+            Body string `json:"body"`
+            Id uuid.UUID `json:"id"`
+            CreatedAt time.Time `json:"created_at"`
+            UpdatedAt time.Time `json:"updated_at"`
+            UserId uuid.UUID `json:"user_id"`
         }
 
         decoder := json.NewDecoder(req.Body)
-        var params request
+        var params newChirpRequest
         if err := decoder.Decode(&params); err != nil {
             log.Printf("error decoding prameters: %s", err)
             w.WriteHeader(http.StatusInternalServerError)
@@ -155,11 +160,37 @@ func main() {
 
         body := cleanseWords(params.Body)
 
-        resp := cleanedResponse{Body: body}
+        cParams := database.CreateChirpParams {
+            Body: body,
+            UserID: params.UserId,
+        }
+
+        chirp, err := dbQueries.CreateChirp(context.Background(), cParams)
+        if err != nil {
+            log.Printf("error creating chirp; err: %s", err)
+            w.WriteHeader(http.StatusInternalServerError)
+            resp := errResponse{Error: "Something went wrong"}
+            jsonData, err := json.Marshal(resp)
+            if err != nil {
+                log.Fatal("could not marshal response")
+            }
+            w.Write(jsonData)
+            return
+
+        }
+
+        resp := newChirpResponse{
+            Id: chirp.ID,
+            UserId: chirp.UserID,
+            CreatedAt: chirp.CreatedAt,
+            UpdatedAt: chirp.UpdatedAt,
+            Body: chirp.Body,
+        }
         jsonData, err := json.Marshal(resp)
         if err != nil {
             log.Fatal("could not marshal response")
         }
+        w.WriteHeader(http.StatusCreated)
         w.Write(jsonData)
     })
 
