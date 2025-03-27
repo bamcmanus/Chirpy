@@ -18,6 +18,17 @@ import (
 	_ "github.com/lib/pq"
 )
 
+type errResponse struct {
+    Error string `json:"error"`
+}
+
+type newChirpResponse struct {
+    Body string `json:"body"`
+    Id uuid.UUID `json:"id"`
+    CreatedAt time.Time `json:"created_at"`
+    UpdatedAt time.Time `json:"updated_at"`
+    UserId uuid.UUID `json:"user_id"`
+}
 
 type apiConfig struct {
     fileserverHits atomic.Int32
@@ -116,23 +127,11 @@ func main() {
     })
 
     mux.HandleFunc("POST /api/chirps", func(w http.ResponseWriter, req *http.Request) {
-        type errResponse struct {
-            Error string `json:"error"`
-        }
-
         type newChirpRequest struct {
             Body string `json:"body"`
             UserId uuid.UUID `json:"user_id"`
         }
         
-        type newChirpResponse struct {
-            Body string `json:"body"`
-            Id uuid.UUID `json:"id"`
-            CreatedAt time.Time `json:"created_at"`
-            UpdatedAt time.Time `json:"updated_at"`
-            UserId uuid.UUID `json:"user_id"`
-        }
-
         decoder := json.NewDecoder(req.Body)
         var params newChirpRequest
         if err := decoder.Decode(&params); err != nil {
@@ -176,7 +175,6 @@ func main() {
             }
             w.Write(jsonData)
             return
-
         }
 
         resp := newChirpResponse{
@@ -194,6 +192,39 @@ func main() {
         w.Write(jsonData)
     })
 
+    mux.HandleFunc("GET /api/chirps", func(w http.ResponseWriter, req *http.Request) {
+        chirps, err := dbQueries.ListChirps(context.Background())        
+        if err != nil {
+            log.Printf("error fetching chirps")
+            w.WriteHeader(http.StatusInternalServerError)
+            resp := errResponse{Error: "Something went wrong"}
+            jsonData, err := json.Marshal(resp)
+            if err != nil {
+                log.Fatal("could not marshal response")
+            }
+            w.Write(jsonData)
+            return
+        }
+
+        var chirpResponses []newChirpResponse
+        for _, chirp := range chirps {
+            chirpResponse := newChirpResponse{
+                Id: chirp.ID,
+                CreatedAt: chirp.CreatedAt,
+                UpdatedAt: chirp.UpdatedAt,
+                Body: chirp.Body,
+                UserId: chirp.UserID,
+            }
+            chirpResponses = append(chirpResponses, chirpResponse)
+        }
+        jsonData, err := json.Marshal(chirpResponses)
+        if err != nil {
+            log.Fatal("could not marshal chirps")
+        }
+        w.WriteHeader(http.StatusOK)
+        w.Write(jsonData)
+    })
+
     mux.HandleFunc("GET /admin/metrics", func(w http.ResponseWriter, req *http.Request) {
         w.Header().Add("Content-Type", "text/html")
         template := `<html>
@@ -204,6 +235,47 @@ func main() {
 </html>`
         htmlContent := fmt.Sprintf(template, cfg.fileserverHits.Load())
         fmt.Fprint(w, htmlContent)
+    })
+
+    mux.HandleFunc("GET /api/chirps/{chirpID}", func(w http.ResponseWriter, req *http.Request) {
+        chirpId := req.PathValue("chirpID")
+        log.Printf("received chirp ID: %s", chirpId)
+        id := uuid.MustParse(chirpId)
+        chirp, err := dbQueries.GetChirp(context.Background(), id)
+        if err != nil {
+            log.Printf("error fetching chirp; err: %s", err)
+            w.WriteHeader(http.StatusInternalServerError)
+            resp := errResponse{Error: "Something went wrong"}
+            jsonData, err := json.Marshal(resp)
+            if err != nil {
+                log.Fatal("could not marshal response")
+            }
+            w.Write(jsonData)
+            return
+        }
+        log.Printf("chirp: %+v", chirp)
+
+        if chirp.ID.String() == "" {
+            w.WriteHeader(http.StatusNotFound)
+            return
+        }
+
+        resp := newChirpResponse{
+            Id: chirp.ID,
+            CreatedAt: chirp.CreatedAt,
+            UpdatedAt: chirp.UpdatedAt,
+            Body: chirp.Body,
+            UserId: chirp.UserID,
+        }
+        jsonData, err := json.Marshal(resp)
+        if err != nil {
+            log.Println("failed to marshal data")
+            w.WriteHeader(http.StatusInternalServerError)
+            return
+        }
+
+        w.WriteHeader(http.StatusOK)
+        w.Write(jsonData)
     })
 
     mux.HandleFunc("POST /admin/reset", func(w http.ResponseWriter, req *http.Request) {
