@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/bamcmanus/Chirpy/internal/auth"
 	"github.com/bamcmanus/Chirpy/internal/database"
 	"github.com/google/uuid"
 	"github.com/joho/godotenv"
@@ -40,6 +41,21 @@ func (c *apiConfig) middlewareMetricsInt(next http.Handler) http.Handler {
         c.fileserverHits.Add(1)
         next.ServeHTTP(w, req)
     })
+}
+
+func respondWithJSON(w http.ResponseWriter, code int, payload interface{}) error {
+    response, err := json.Marshal(payload)
+    if err != nil {
+        return err
+    }
+    w.Header().Set("Content-Type", "application/json")
+    w.WriteHeader(code)
+    w.Write(response)
+    return nil
+}
+
+func respondWithError(w http.ResponseWriter, code int, msg string) error {
+    return respondWithJSON(w, code, errResponse{Error: msg})
 }
 
 func cleanseWords(body string) string {
@@ -75,6 +91,7 @@ func main() {
     mux.HandleFunc("POST /api/users", func(w http.ResponseWriter, req *http.Request) {
         type newUserRequest struct {
             Email string `json:"email"`
+            Password string `json:"password"`
         }
 
         type newUserResponse struct {
@@ -87,15 +104,27 @@ func main() {
         var newUserReq newUserRequest
         decoder := json.NewDecoder(req.Body)
         if err := decoder.Decode(&newUserReq); err != nil {
-            log.Println("could not decode new user request")
-            w.WriteHeader(http.StatusInternalServerError)
+            log.Printf("failed to decode request body; error: %s", err)
+            _ = respondWithError(w, http.StatusInternalServerError, "could not decode new user request")
             return
         }
 
-        user, err := dbQueries.CreateUser(context.Background(), newUserReq.Email)
+        if newUserReq.Password == "" {
+            _ = respondWithError(w, http.StatusBadRequest, "password required")
+            return
+        }
+
+        hashedPassword, err := auth.HashPassword(newUserReq.Password)
         if err != nil {
-            log.Printf("failed to create user; err: %s", err)
-            w.WriteHeader(http.StatusInternalServerError)
+            log.Printf("failed to hash password; error: %s", err)
+            _ = respondWithError(w, http.StatusInternalServerError, "failed hashing password")
+            return
+        }
+
+        params := database.CreateUserParams{Email: newUserReq.Email, HashedPassword: hashedPassword}
+        user, err := dbQueries.CreateUser(context.Background(), params)
+        if err != nil {
+            _ = respondWithError(w, http.StatusInternalServerError, "failed to create user")
             return
         }
 
@@ -106,16 +135,7 @@ func main() {
             Id: user.ID,
         }
 
-        jsonData, err := json.Marshal(res)
-        if err != nil {
-            log.Printf("failed to marshal created user; err: %s", err)
-            w.WriteHeader(http.StatusInternalServerError)
-            return
-        }
-
-        w.Header().Set("Content-Type", "application/json")
-        w.WriteHeader(http.StatusCreated)
-        w.Write(jsonData)
+        _ = respondWithJSON(w, http.StatusCreated, res)
     })
 
     mux.Handle("/app/", cfg.middlewareMetricsInt(http.StripPrefix("/app", http.FileServer(http.Dir(".")))))
@@ -136,24 +156,12 @@ func main() {
         var params newChirpRequest
         if err := decoder.Decode(&params); err != nil {
             log.Printf("error decoding prameters: %s", err)
-            w.WriteHeader(http.StatusInternalServerError)
-            resp := errResponse{Error: "Something went wrong"}
-            jsonData, err := json.Marshal(resp)
-            if err != nil {
-                log.Fatal("could not marshal response")
-            }
-            w.Write(jsonData)
+            _ = respondWithError(w, http.StatusInternalServerError, "Something went wrong")
             return
         }
 
         if len(params.Body) > 140 {
-            resp := errResponse{Error: "Chirp is too long"}
-            w.WriteHeader(http.StatusBadRequest)
-            jsonData, err := json.Marshal(resp)
-            if err != nil {
-                log.Fatal("could not marshal response")
-            }
-            w.Write(jsonData)
+            _ = respondWithError(w, http.StatusBadRequest, "Chirp is too long")
             return
         }
 
@@ -167,13 +175,7 @@ func main() {
         chirp, err := dbQueries.CreateChirp(context.Background(), cParams)
         if err != nil {
             log.Printf("error creating chirp; err: %s", err)
-            w.WriteHeader(http.StatusInternalServerError)
-            resp := errResponse{Error: "Something went wrong"}
-            jsonData, err := json.Marshal(resp)
-            if err != nil {
-                log.Fatal("could not marshal response")
-            }
-            w.Write(jsonData)
+            _ = respondWithError(w, http.StatusInternalServerError, "failed to create chirp")
             return
         }
 
@@ -184,25 +186,17 @@ func main() {
             UpdatedAt: chirp.UpdatedAt,
             Body: chirp.Body,
         }
-        jsonData, err := json.Marshal(resp)
+        err = respondWithJSON(w, http.StatusCreated, resp)
         if err != nil {
             log.Fatal("could not marshal response")
         }
-        w.WriteHeader(http.StatusCreated)
-        w.Write(jsonData)
     })
 
     mux.HandleFunc("GET /api/chirps", func(w http.ResponseWriter, req *http.Request) {
         chirps, err := dbQueries.ListChirps(context.Background())        
         if err != nil {
-            log.Printf("error fetching chirps")
-            w.WriteHeader(http.StatusInternalServerError)
-            resp := errResponse{Error: "Something went wrong"}
-            jsonData, err := json.Marshal(resp)
-            if err != nil {
-                log.Fatal("could not marshal response")
-            }
-            w.Write(jsonData)
+            log.Printf("error fetching chirps: %s", err)
+            _ = respondWithError(w, http.StatusInternalServerError, "failed to fetch chirps")
             return
         }
 
@@ -217,12 +211,7 @@ func main() {
             }
             chirpResponses = append(chirpResponses, chirpResponse)
         }
-        jsonData, err := json.Marshal(chirpResponses)
-        if err != nil {
-            log.Fatal("could not marshal chirps")
-        }
-        w.WriteHeader(http.StatusOK)
-        w.Write(jsonData)
+        _ = respondWithJSON(w, http.StatusOK, chirpResponses)
     })
 
     mux.HandleFunc("GET /admin/metrics", func(w http.ResponseWriter, req *http.Request) {
@@ -244,19 +233,13 @@ func main() {
         chirp, err := dbQueries.GetChirp(context.Background(), id)
         if err != nil {
             log.Printf("error fetching chirp; err: %s", err)
-            w.WriteHeader(http.StatusInternalServerError)
-            resp := errResponse{Error: "Something went wrong"}
-            jsonData, err := json.Marshal(resp)
-            if err != nil {
-                log.Fatal("could not marshal response")
-            }
-            w.Write(jsonData)
+            _ = respondWithError(w, http.StatusInternalServerError, "failed to get chirps")
             return
         }
         log.Printf("chirp: %+v", chirp)
 
         if chirp.ID.String() == "" {
-            w.WriteHeader(http.StatusNotFound)
+            _ = respondWithError(w, http.StatusNotFound, "chirp not found")
             return
         }
 
@@ -267,15 +250,7 @@ func main() {
             Body: chirp.Body,
             UserId: chirp.UserID,
         }
-        jsonData, err := json.Marshal(resp)
-        if err != nil {
-            log.Println("failed to marshal data")
-            w.WriteHeader(http.StatusInternalServerError)
-            return
-        }
-
-        w.WriteHeader(http.StatusOK)
-        w.Write(jsonData)
+        _ = respondWithJSON(w, http.StatusOK, resp)
     })
 
     mux.HandleFunc("POST /admin/reset", func(w http.ResponseWriter, req *http.Request) {
@@ -286,7 +261,7 @@ func main() {
 
         if err := dbQueries.DeleteUsers(context.Background()); err != nil {
             log.Printf("error deleting users; err: %s", err)
-            w.WriteHeader(http.StatusInternalServerError)
+            _ = respondWithError(w, http.StatusInternalServerError, "error deleting users")
             return
         }
 
