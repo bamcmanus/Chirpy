@@ -31,6 +31,14 @@ type newChirpResponse struct {
     UserId uuid.UUID `json:"user_id"`
 }
 
+type newUserResponse struct {
+    Id uuid.UUID `json:"id"`
+    CreatedAt time.Time `json:"created_at"`
+    UpdatedAt time.Time `json:"updated_at"`
+    Email string `json:"email"`
+}
+
+
 type apiConfig struct {
     fileserverHits atomic.Int32
     platform string
@@ -43,7 +51,7 @@ func (c *apiConfig) middlewareMetricsInt(next http.Handler) http.Handler {
     })
 }
 
-func respondWithJSON(w http.ResponseWriter, code int, payload interface{}) error {
+func respondWithJSON(w http.ResponseWriter, code int, payload any) error {
     response, err := json.Marshal(payload)
     if err != nil {
         return err
@@ -88,17 +96,51 @@ func main() {
     cfg.platform = platform
     mux := http.NewServeMux()
 
+    mux.HandleFunc("POST /api/login", func(w http.ResponseWriter, req *http.Request) {
+        type login struct {
+            Password string `json:"password"`
+            Email string `json:"email"`
+        }
+
+        var loginRequest login
+        decoder := json.NewDecoder(req.Body)
+        if err := decoder.Decode(&loginRequest); err != nil {
+            log .Printf("failed to decode request; error: %s", err)
+            respondWithError(w, http.StatusInternalServerError, "failed to decode request")
+            return
+        }
+
+        log.Printf("received login requst: %+v", loginRequest)
+        user, err := dbQueries.GetUserByEmail(context.Background(), loginRequest.Email)
+        if err != nil {
+            log.Printf("failed to get user; error: %s", err)
+            respondWithError(w, http.StatusUnauthorized, "Incorrect email or Password")
+            return
+        }
+
+        err = auth.CheckPasswordHash(user.HashedPassword, loginRequest.Password)
+        if err != nil {
+            log.Printf("passowrds do not match; error: %s", err)
+            respondWithError(w, http.StatusUnauthorized, "Incorrect email or password")
+            return
+        }
+
+        userReponse := newUserResponse{
+            Id: user.ID,
+            CreatedAt: user.CreatedAt,
+            UpdatedAt: user.UpdatedAt,
+            Email: user.Email,
+        }
+        if err := respondWithJSON(w, http.StatusOK, userReponse); err != nil {
+            log.Printf("failed to respond; error: %s", err)
+        }
+
+    })
+
     mux.HandleFunc("POST /api/users", func(w http.ResponseWriter, req *http.Request) {
         type newUserRequest struct {
             Email string `json:"email"`
             Password string `json:"password"`
-        }
-
-        type newUserResponse struct {
-            Id uuid.UUID `json:"id"`
-            CreatedAt time.Time `json:"created_at"`
-            UpdatedAt time.Time `json:"updated_at"`
-            Email string `json:"email"`
         }
 
         var newUserReq newUserRequest
