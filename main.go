@@ -42,6 +42,7 @@ type newUserResponse struct {
 type apiConfig struct {
     fileserverHits atomic.Int32
     platform string
+    jwtSecret string
 }
 
 func (c *apiConfig) middlewareMetricsInt(next http.Handler) http.Handler {
@@ -92,14 +93,23 @@ func main() {
     dbQueries := database.New(db)
     
     var cfg apiConfig
-    platform := os.Getenv("PLATFORM")
-    cfg.platform = platform
+    cfg.platform = os.Getenv("PLATFORM")
+    if cfg.platform == "" {
+        log.Fatal("PLATFORM not set")
+    }
+    
+    cfg.jwtSecret = os.Getenv("JWT_SECRET")
+    if cfg.jwtSecret == "" {
+        log.Fatal("JWT_SECRET was not set")
+    }
+
     mux := http.NewServeMux()
 
     mux.HandleFunc("POST /api/login", func(w http.ResponseWriter, req *http.Request) {
         type login struct {
             Password string `json:"password"`
             Email string `json:"email"`
+            ExpiresInSeconds int `json:"expires_in_seconds"`
         }
 
         var loginRequest login
@@ -110,7 +120,11 @@ func main() {
             return
         }
 
-        log.Printf("received login requst: %+v", loginRequest)
+        expiry := 3600
+        if loginRequest.ExpiresInSeconds > 0 && loginRequest.ExpiresInSeconds < 3600 {
+            expiry = loginRequest.ExpiresInSeconds
+        }
+
         user, err := dbQueries.GetUserByEmail(context.Background(), loginRequest.Email)
         if err != nil {
             log.Printf("failed to get user; error: %s", err)
@@ -125,16 +139,29 @@ func main() {
             return
         }
 
-        userReponse := newUserResponse{
+        token, err := auth.MakeJWT(user.ID, cfg.jwtSecret, time.Duration(expiry) * time.Second)
+        if err != nil {
+            log.Printf("could not create JWT; error: %s", err)
+            respondWithError(w, http.StatusInternalServerError, "failed to create JWT")
+            return
+        }
+
+        userReponse := struct{
+            Id uuid.UUID `json:"id"`
+            CreatedAt time.Time `json:"created_at"`
+            UpdatedAt time.Time `json:"updated_at"`
+            Email string `json:"email"`
+            Token string `json:"token"`
+        }{
             Id: user.ID,
             CreatedAt: user.CreatedAt,
             UpdatedAt: user.UpdatedAt,
             Email: user.Email,
+            Token: token,
         }
         if err := respondWithJSON(w, http.StatusOK, userReponse); err != nil {
             log.Printf("failed to respond; error: %s", err)
         }
-
     })
 
     mux.HandleFunc("POST /api/users", func(w http.ResponseWriter, req *http.Request) {
@@ -191,7 +218,20 @@ func main() {
     mux.HandleFunc("POST /api/chirps", func(w http.ResponseWriter, req *http.Request) {
         type newChirpRequest struct {
             Body string `json:"body"`
-            UserId uuid.UUID `json:"user_id"`
+        }
+
+        token, err := auth.GetBearerToken(req.Header)
+        if err != nil {
+            log.Printf("failed to fetch Bearer token; error: %s", err)
+            respondWithError(w, http.StatusUnauthorized, "unauthorized")
+            return
+        }
+
+        userId, err := auth.ValidateJWT(token, cfg.jwtSecret)
+        if err != nil  {
+            log.Printf("JWT validation failed; error: %s", err)
+            respondWithError(w, http.StatusUnauthorized, "unauthorized")
+            return
         }
         
         decoder := json.NewDecoder(req.Body)
@@ -211,7 +251,7 @@ func main() {
 
         cParams := database.CreateChirpParams {
             Body: body,
-            UserID: params.UserId,
+            UserID: userId,
         }
 
         chirp, err := dbQueries.CreateChirp(context.Background(), cParams)
