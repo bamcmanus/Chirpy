@@ -109,40 +109,52 @@ func main() {
         type login struct {
             Password string `json:"password"`
             Email string `json:"email"`
-            ExpiresInSeconds int `json:"expires_in_seconds"`
         }
 
         var loginRequest login
         decoder := json.NewDecoder(req.Body)
         if err := decoder.Decode(&loginRequest); err != nil {
             log .Printf("failed to decode request; error: %s", err)
-            respondWithError(w, http.StatusInternalServerError, "failed to decode request")
+            _ = respondWithError(w, http.StatusInternalServerError, "failed to decode request")
             return
-        }
-
-        expiry := 3600
-        if loginRequest.ExpiresInSeconds > 0 && loginRequest.ExpiresInSeconds < 3600 {
-            expiry = loginRequest.ExpiresInSeconds
         }
 
         user, err := dbQueries.GetUserByEmail(context.Background(), loginRequest.Email)
         if err != nil {
             log.Printf("failed to get user; error: %s", err)
-            respondWithError(w, http.StatusUnauthorized, "Incorrect email or Password")
+            _ = respondWithError(w, http.StatusUnauthorized, "Incorrect email or Password")
             return
         }
 
         err = auth.CheckPasswordHash(user.HashedPassword, loginRequest.Password)
         if err != nil {
             log.Printf("passowrds do not match; error: %s", err)
-            respondWithError(w, http.StatusUnauthorized, "Incorrect email or password")
+            _ = respondWithError(w, http.StatusUnauthorized, "Incorrect email or password")
             return
         }
 
-        token, err := auth.MakeJWT(user.ID, cfg.jwtSecret, time.Duration(expiry) * time.Second)
+        token, err := auth.MakeJWT(user.ID, cfg.jwtSecret, time.Duration(3600) * time.Second)
         if err != nil {
             log.Printf("could not create JWT; error: %s", err)
-            respondWithError(w, http.StatusInternalServerError, "failed to create JWT")
+            _ = respondWithError(w, http.StatusInternalServerError, "failed to create JWT")
+            return
+        }
+
+        refreshToken, err := auth.MakeRefreshToken()
+        if err != nil {
+            log.Printf("could not create refresh token; error: %s", err)
+            _ = respondWithError(w, http.StatusInternalServerError, "failed to create refresh token")
+            return
+        }
+
+        params := database.CreateRefreshTokenParams{
+            Token: refreshToken,
+            UserID: user.ID,
+        }
+        _, err = dbQueries.CreateRefreshToken(context.Background(), params)
+        if err != nil {
+            log.Printf("could not perisste refresh token; error: %s", err)
+            _ = respondWithError(w, http.StatusInternalServerError, "refresh token creation failed")
             return
         }
 
@@ -152,16 +164,73 @@ func main() {
             UpdatedAt time.Time `json:"updated_at"`
             Email string `json:"email"`
             Token string `json:"token"`
+            RefreshToken string `json:"refresh_token"`
         }{
             Id: user.ID,
             CreatedAt: user.CreatedAt,
             UpdatedAt: user.UpdatedAt,
             Email: user.Email,
             Token: token,
+            RefreshToken: refreshToken,
         }
         if err := respondWithJSON(w, http.StatusOK, userReponse); err != nil {
             log.Printf("failed to respond; error: %s", err)
         }
+    })
+
+    mux.HandleFunc("POST /api/refresh", func(w http.ResponseWriter, req *http.Request) {
+        refreshToken, err := auth.GetBearerToken(req.Header)
+        if err != nil {
+            log.Printf("failed to fetch Bearer token; error: %s", err)
+            _ = respondWithError(w, http.StatusUnauthorized, "unauthorized")
+            return
+        }
+
+        token, err :=dbQueries.GetRefreshToken(req.Context(), refreshToken)
+        if err != nil {
+            log.Printf("error fetching refresh token; error: %s", err)
+            _ = respondWithError(w, http.StatusUnauthorized, "unauthorized")
+            return
+        }
+
+        if token.RevokedAt.Valid {
+            log.Printf("token is expired; expiration time: %v", token.RevokedAt)
+            _ = respondWithError(w, http.StatusUnauthorized, "unauthorized")
+            return
+        }
+
+        jwt, err := auth.MakeJWT(token.UserID, cfg.jwtSecret, time.Duration(3600) * time.Second)
+        if err != nil {
+            log.Printf("could not create JWT; error: %s", err)
+            _ = respondWithError(w, http.StatusInternalServerError, "failed to create JWT")
+            return
+        }
+
+        res := struct{
+            Token string `json:"token"`
+        }{
+            Token: jwt,
+        }
+        if err := respondWithJSON(w, http.StatusOK, res); err != nil {
+            log.Printf("failed to respond; error: %s", err)
+        }
+    })
+
+    mux.HandleFunc("POST /api/revoke", func(w http.ResponseWriter, req *http.Request) {
+        refreshToken, err := auth.GetBearerToken(req.Header)
+        if err != nil {
+            log.Printf("failed to fetch Bearer token; error: %s", err)
+            _ = respondWithError(w, http.StatusUnauthorized, "unauthorized")
+            return
+        }
+
+        _, err = dbQueries.RevokeRefreshToken(req.Context(), refreshToken)
+        if err != nil {
+            log.Printf("failed to revoke token; error: %s", err)
+            _ = respondWithError(w, http.StatusInternalServerError, "")
+        }
+
+        w.WriteHeader(http.StatusNoContent) 
     })
 
     mux.HandleFunc("POST /api/users", func(w http.ResponseWriter, req *http.Request) {
@@ -223,14 +292,14 @@ func main() {
         token, err := auth.GetBearerToken(req.Header)
         if err != nil {
             log.Printf("failed to fetch Bearer token; error: %s", err)
-            respondWithError(w, http.StatusUnauthorized, "unauthorized")
+            _ = respondWithError(w, http.StatusUnauthorized, "unauthorized")
             return
         }
 
         userId, err := auth.ValidateJWT(token, cfg.jwtSecret)
         if err != nil  {
             log.Printf("JWT validation failed; error: %s", err)
-            respondWithError(w, http.StatusUnauthorized, "unauthorized")
+            _ = respondWithError(w, http.StatusUnauthorized, "unauthorized")
             return
         }
         
