@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -119,7 +118,7 @@ func main() {
             return
         }
 
-        user, err := dbQueries.GetUserByEmail(context.Background(), loginRequest.Email)
+        user, err := dbQueries.GetUserByEmail(req.Context(), loginRequest.Email)
         if err != nil {
             log.Printf("failed to get user; error: %s", err)
             _ = respondWithError(w, http.StatusUnauthorized, "Incorrect email or Password")
@@ -151,7 +150,7 @@ func main() {
             Token: refreshToken,
             UserID: user.ID,
         }
-        _, err = dbQueries.CreateRefreshToken(context.Background(), params)
+        _, err = dbQueries.CreateRefreshToken(req.Context(), params)
         if err != nil {
             log.Printf("could not perisste refresh token; error: %s", err)
             _ = respondWithError(w, http.StatusInternalServerError, "refresh token creation failed")
@@ -260,7 +259,7 @@ func main() {
         }
 
         params := database.CreateUserParams{Email: newUserReq.Email, HashedPassword: hashedPassword}
-        user, err := dbQueries.CreateUser(context.Background(), params)
+        user, err := dbQueries.CreateUser(req.Context(), params)
         if err != nil {
             _ = respondWithError(w, http.StatusInternalServerError, "failed to create user")
             return
@@ -323,7 +322,7 @@ func main() {
             UserID: userId,
         }
 
-        chirp, err := dbQueries.CreateChirp(context.Background(), cParams)
+        chirp, err := dbQueries.CreateChirp(req.Context(), cParams)
         if err != nil {
             log.Printf("error creating chirp; err: %s", err)
             _ = respondWithError(w, http.StatusInternalServerError, "failed to create chirp")
@@ -344,7 +343,7 @@ func main() {
     })
 
     mux.HandleFunc("GET /api/chirps", func(w http.ResponseWriter, req *http.Request) {
-        chirps, err := dbQueries.ListChirps(context.Background())        
+        chirps, err := dbQueries.ListChirps(req.Context())        
         if err != nil {
             log.Printf("error fetching chirps: %s", err)
             _ = respondWithError(w, http.StatusInternalServerError, "failed to fetch chirps")
@@ -381,7 +380,7 @@ func main() {
         chirpId := req.PathValue("chirpID")
         log.Printf("received chirp ID: %s", chirpId)
         id := uuid.MustParse(chirpId)
-        chirp, err := dbQueries.GetChirp(context.Background(), id)
+        chirp, err := dbQueries.GetChirp(req.Context(), id)
         if err != nil {
             log.Printf("error fetching chirp; err: %s", err)
             _ = respondWithError(w, http.StatusInternalServerError, "failed to get chirps")
@@ -410,7 +409,7 @@ func main() {
             return
         }
 
-        if err := dbQueries.DeleteUsers(context.Background()); err != nil {
+        if err := dbQueries.DeleteUsers(req.Context()); err != nil {
             log.Printf("error deleting users; err: %s", err)
             _ = respondWithError(w, http.StatusInternalServerError, "error deleting users")
             return
