@@ -108,7 +108,19 @@ func (c ChirpsHandler) PostChirp(w http.ResponseWriter, req *http.Request) {
 }
 
 func (c ChirpsHandler) GetChirps(w http.ResponseWriter, req *http.Request) {
-    chirps, err := c.dbQueries.ListChirps(req.Context())        
+    id := req.URL.Query().Get("author_id")
+
+    var chirps []database.Chirp
+    var err error
+    if id == "" {
+        chirps, err = c.dbQueries.ListChirps(req.Context())        
+    } else {
+        userId, err := uuid.Parse(id)
+        if err != nil {
+            log.Fatal("invalid user id")
+        }
+        chirps, err = c.dbQueries.ListChirpsByUser(req.Context(), userId)
+    }
     if err != nil {
         log.Printf("error fetching chirps: %s", err)
         _ = respondWithError(w, http.StatusNotFound, "failed to fetch chirps")

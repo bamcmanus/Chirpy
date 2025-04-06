@@ -106,6 +106,42 @@ func (q *Queries) ListChirps(ctx context.Context) ([]Chirp, error) {
 	return items, nil
 }
 
+const listChirpsByUser = `-- name: ListChirpsByUser :many
+SELECT id, user_id, created_at, updated_at, body
+FROM chirps
+WHERE user_id = $1
+ORDER BY created_at
+`
+
+func (q *Queries) ListChirpsByUser(ctx context.Context, userID uuid.UUID) ([]Chirp, error) {
+	rows, err := q.db.QueryContext(ctx, listChirpsByUser, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Chirp
+	for rows.Next() {
+		var i Chirp
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Body,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const upgradeUser = `-- name: UpgradeUser :one
 UPDATE users
 SET is_chirpy_red = true
