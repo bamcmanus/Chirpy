@@ -83,6 +83,7 @@ func (a AuthHandler) Login(w http.ResponseWriter, req *http.Request) {
         Email string `json:"email"`
         Token string `json:"token"`
         RefreshToken string `json:"refresh_token"`
+        IsChiryRed bool `json:"is_chirpy_red"`
     }{
         Id: user.ID,
         CreatedAt: user.CreatedAt,
@@ -90,6 +91,7 @@ func (a AuthHandler) Login(w http.ResponseWriter, req *http.Request) {
         Email: user.Email,
         Token: token,
         RefreshToken: refreshToken,
+        IsChiryRed: user.IsChirpyRed,
     }
     if err := respondWithJSON(w, http.StatusOK, userReponse); err != nil {
         log.Printf("failed to respond; error: %s", err)

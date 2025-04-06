@@ -28,6 +28,7 @@ type userResponse struct {
     CreatedAt time.Time `json:"created_at"`
     UpdatedAt time.Time `json:"updated_at"`
     Email string `json:"email"`
+    IsChirpyRed bool `json:"is_chirpy_red"`
 }
 
 type userRequest struct {
@@ -69,6 +70,7 @@ func (u UserHandler) CreateUser(w http.ResponseWriter, req *http.Request) {
         CreatedAt: user.CreatedAt,
         UpdatedAt: user.UpdatedAt,
         Id: user.ID,
+        IsChirpyRed: user.IsChirpyRed,
     }
 
     _ = respondWithJSON(w, http.StatusCreated, res)
@@ -126,6 +128,7 @@ func (u UserHandler) UpdateUser(w http.ResponseWriter, req *http.Request) {
         CreatedAt: user.CreatedAt,
         UpdatedAt: user.UpdatedAt,
         Email: user.Email,
+        IsChirpyRed: user.IsChirpyRed,
     }
 
     _ = respondWithJSON(w, http.StatusOK, res)

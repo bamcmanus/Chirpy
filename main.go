@@ -17,6 +17,7 @@ type apiConfig struct {
     fileserverHits atomic.Int32
     platform string
     jwtSecret string
+    polkaKey string
 }
 
 func (c *apiConfig) middlewareMetricsInt(next http.Handler) http.Handler {
@@ -45,9 +46,18 @@ func main() {
         log.Fatal("JWT_SECRET was not set")
     }
 
+    cfg.polkaKey = os.Getenv("POLKA_KEY")
+    if cfg.polkaKey == "" {
+        log.Fatal("POLKA_KEY was not set")
+    }
+
     mux := http.NewServeMux()
 
     dbQueries := database.New(db)
+
+    polkaHandler := handlers.NewPolkaHandler(dbQueries, cfg.polkaKey)
+
+    mux.HandleFunc("POST /api/polka/webhooks", polkaHandler.UpgradeUser)
 
     authHandler := handlers.NewAuthHandler(dbQueries, cfg.jwtSecret)
 

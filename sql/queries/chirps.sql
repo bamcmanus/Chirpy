@@ -23,3 +23,9 @@ WHERE Id = $1;
 DELETE
 FROM chirps
 WHERE id = $1;
+
+-- name: UpgradeUser :one
+UPDATE users
+SET is_chirpy_red = true
+WHERE id = $1
+RETURNING *;

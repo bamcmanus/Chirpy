@@ -8,4 +8,5 @@ This project depends on environment variables being set in a .env file with the 
 DB_URL="<CONNECTION_URL_TO_POSTGRESQL>"
 PLATFORM="<ENV>"
 JWT_SECRET="<SECRET_USED_FOR_SIGNING_AND_VERIFICATION_OF_JWT>"
+POLKA_KEY="<SECERT_USED_FOR_WEBHOOK_AUTH>"
 ```
