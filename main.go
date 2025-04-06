@@ -57,9 +57,11 @@ func main() {
 
     mux.HandleFunc("POST /api/revoke", authHandler.Revoke)
 
-    userHandler := handlers.NewUserHandler(dbQueries)
+    userHandler := handlers.NewUserHandler(dbQueries, cfg.jwtSecret)
 
     mux.HandleFunc("POST /api/users", userHandler.CreateUser)
+
+    mux.HandleFunc("PUT /api/users", userHandler.UpdateUser)
 
     mux.Handle("/app/", cfg.middlewareMetricsInt(http.StripPrefix("/app", http.FileServer(http.Dir(".")))))
 
@@ -72,6 +74,8 @@ func main() {
     mux.HandleFunc("GET /api/chirps", chirpsHandler.GetChirps)
 
     mux.HandleFunc("GET /api/chirps/{chirpID}", chirpsHandler.GetChirp)
+
+    mux.HandleFunc("DELETE /api/chirps/{chirpID}", chirpsHandler.DeleteChirp)
 
     adminHandler := handlers.NewAdminHandler(dbQueries, cfg.platform, &cfg.fileserverHits)
 
