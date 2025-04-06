@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -125,6 +126,13 @@ func (c ChirpsHandler) GetChirps(w http.ResponseWriter, req *http.Request) {
         log.Printf("error fetching chirps: %s", err)
         _ = respondWithError(w, http.StatusNotFound, "failed to fetch chirps")
         return
+    }
+
+    sortOrder := req.URL.Query().Get("sort")
+    if sortOrder == "desc" {
+        sort.Slice(chirps, func(i, j int) bool {
+            return chirps[i].CreatedAt.After(chirps[j].CreatedAt)
+        })
     }
 
     var chirpResponses []newChirpResponse
